@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel ESP32-C3 IoT</title>
+  <!-- Biblioteca MQTT sobre WebSockets -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #0f111a;
+      color: #e6e6ef;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    .card {
+      background-color: #1a1d2e;
+      border: 1px solid #2b304c;
+      border-radius: 16px;
+      padding: 32px 24px;
+      width: 100%;
+      max-width: 380px;
+      text-align: center;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .subtitle {
+      color: #7b849b;
+      font-size: 13px;
+      margin-bottom: 30px;
+    }
+    .status-container {
+      background-color: #131522;
+      border-radius: 12px;
+      padding: 18px;
+      margin-bottom: 28px;
+    }
+    .status-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #7b849b;
+      margin-bottom: 6px;
+    }
+    .status-value {
+      font-size: 20px;
+      font-weight: 700;
+    }
+    .ligado { color: #00e676; }
+    .desligado { color: #ff5252; }
+    .btn {
+      width: 100%;
+      padding: 16px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      color: #fff;
+      background-color: #3b82f6;
+      box-shadow: 0 4px 14px rgba(59, 130, 246, 0.35);
+      transition: background-color 0.2s, transform 0.1s;
+    }
+    .btn:active {
+      transform: scale(0.97);
+    }
+    .btn:disabled {
+      background-color: #4b5563;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    .broker-status {
+      margin-top: 24px;
+      font-size: 12px;
+      color: #7b849b;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: #eab308;
+    }
+    .dot.connected { background-color: #00e676; }
+    .dot.disconnected { background-color: #ff5252; }
+  </style>
+</head>
+<body>
+
+  <div class="card">
+    <h1>Controle de LED</h1>
+    <p class="subtitle">ESP32-C3 Super Mini</p>
+
+    <div class="status-container">
+      <div class="status-label">Estado Atual</div>
+      <div id="led-status" class="status-value desligado">DESLIGADO</div>
+    </div>
+
+    <button id="toggle-btn" class="btn" onclick="alternarLed()" disabled>
+      Conectando...
+    </button>
+
+    <div class="broker-status">
+      <span id="conn-dot" class="dot"></span>
+      <span id="conn-text">Conectando ao Broker MQTT...</span>
+    </div>
+  </div>
+
+  <script>
+    // Tópicos MQTT (certifique-se de que são os mesmos gravados no código da ESP32)
+    const TOPICO_COMANDO = "makereasy/c3/led/set";
+    const TOPICO_STATUS  = "makereasy/c3/led/status";
+
+    let estadoLed = "0"; // "0" = desligado, "1" = ligado
+
+    const statusLabel = document.getElementById("led-status");
+    const toggleBtn   = document.getElementById("toggle-btn");
+    const connDot     = document.getElementById("conn-dot");
+    const connText    = document.getElementById("conn-text");
+
+    // Conexão WebSockets WSS com o broker público HiveMQ
+    const client = mqtt.connect("wss://broker.hivemq.com:8884/mqtt");
+
+    client.on("connect", () => {
+      connDot.className = "dot connected";
+      connText.textContent = "Conectado à nuvem";
+      toggleBtn.disabled = false;
+      toggleBtn.textContent = "Alternar LED";
+
+      // Inscreve no tópico para escutar o status real enviado pela ESP32
+      client.subscribe(TOPICO_STATUS);
+    });
+
+    client.on("offline", () => {
+      connDot.className = "dot disconnected";
+      connText.textContent = "Desconectado da nuvem";
+      toggleBtn.disabled = true;
+    });
+
+    client.on("message", (topic, message) => {
+      if (topic === TOPICO_STATUS) {
+        estadoLed = message.toString();
+        atualizarInterface();
+      }
+    });
+
+    function atualizarInterface() {
+      if (estadoLed === "1") {
+        statusLabel.textContent = "LIGADO";
+        statusLabel.className = "status-value ligado";
+      } else {
+        statusLabel.textContent = "DESLIGADO";
+        statusLabel.className = "status-value desligado";
+      }
+    }
+
+    function alternarLed() {
+      // Inverte o estado e envia o comando
+      const novoEstado = estadoLed === "1" ? "0" : "1";
+      client.publish(TOPICO_COMANDO, novoEstado);
+    }
+  </script>
+
+</body>
+</html>
