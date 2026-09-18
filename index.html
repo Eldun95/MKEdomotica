@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Controle ESP32-C3 IoT</title>
-  <!-- Versão estável do cliente MQTT via WebSockets -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -37,7 +36,7 @@
       margin-bottom: 24px;
     }
     .status-label { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #7b849b; margin-bottom: 6px; }
-    .status-value { font-size: 24px; font-weight: 700; }
+    .status-value { font-size: 24px; font-weight: 700; transition: color 0.2s; }
     .ligado { color: #00e676; }
     .desligado { color: #ff5252; }
     .btn {
@@ -54,7 +53,7 @@
       transition: all 0.2s;
     }
     .btn:active { transform: scale(0.97); }
-    .btn:disabled { background-color: #374151; cursor: not-allowed; box-shadow: none; }
+    .btn:disabled { background-color: #374151; cursor: not-allowed; box-shadow: none; color: #9ca3af; }
     .info { margin-top: 20px; font-size: 12px; color: #7b849b; }
   </style>
 </head>
@@ -69,70 +68,92 @@
       <div id="led-status" class="status-value desligado">DESLIGADO</div>
     </div>
 
-    <button id="toggle-btn" class="btn" onclick="alternarLed()" disabled>Conectando ao Broker...</button>
+    <button id="toggle-btn" class="btn" onclick="alternarLed()" disabled>Conectando...</button>
 
     <div id="conn-info" class="info">Iniciando conexão segura...</div>
   </div>
 
   <script>
-    // Mesmos tópicos do firmware C++
     const TOPICO_CMD  = "c3supermini/edu/led/set";
     const TOPICO_STAT = "c3supermini/edu/led/status";
 
     let estadoAtual = "0";
+    let aguardandoResposta = false;
 
     const statusEl = document.getElementById("led-status");
     const btnEl    = document.getElementById("toggle-btn");
     const infoEl   = document.getElementById("conn-info");
 
-    // Conexão via Paho MQTT (WebSockets Seguro WSS na porta 8884)
-    const clientId = "WebClient-" + Math.floor(Math.random() * 100000);
+    const clientId = "WebClient-" + Math.floor(Math.random() * 1000000);
     const client   = new Paho.MQTT.Client("broker.hivemq.com", 8884, "/mqtt", clientId);
 
     client.onConnectionLost = (response) => {
-      infoEl.textContent = "Conexão perdida. Tentando reconectar...";
+      infoEl.textContent = "Conexão perdida. Reconectando em 2s...";
       btnEl.disabled = true;
-      setTimeout(conectar, 3000);
+      setTimeout(conectar, 2000);
     };
 
     client.onMessageArrived = (message) => {
       if (message.destinationName === TOPICO_STAT) {
         estadoAtual = message.payloadString;
+        aguardandoResposta = false;
+        btnEl.disabled = false;
+
         if (estadoAtual === "1") {
           statusEl.textContent = "LIGADO";
           statusEl.className = "status-value ligado";
+          btnEl.textContent = "Desligar LED";
         } else {
           statusEl.textContent = "DESLIGADO";
           statusEl.className = "status-value desligado";
+          btnEl.textContent = "Ligar LED";
         }
       }
     };
 
     function conectar() {
+      infoEl.textContent = "Conectando à nuvem...";
       client.connect({
         useSSL: true,
         timeout: 5,
+        keepAliveInterval: 20,
+        cleanSession: true,
         onSuccess: () => {
           infoEl.textContent = "Nuvem Conectada!";
           btnEl.disabled = false;
-          btnEl.textContent = "Alternar LED";
+          btnEl.textContent = estadoAtual === "1" ? "Desligar LED" : "Ligar LED";
           client.subscribe(TOPICO_STAT);
         },
-        onFailure: (err) => {
-          infoEl.textContent = "Erro ao conectar no broker. Nova tentativa em 3s...";
+        onFailure: () => {
+          infoEl.textContent = "Erro na rede. Tentando em 3s...";
           setTimeout(conectar, 3000);
         }
       });
     }
 
     function alternarLed() {
+      if (aguardandoResposta) return;
+
       const proximoEstado = (estadoAtual === "1") ? "0" : "1";
+      btnEl.disabled = true;
+      btnEl.textContent = "Processando...";
+      aguardandoResposta = true;
+
       const message = new Paho.MQTT.Message(proximoEstado);
       message.destinationName = TOPICO_CMD;
+      message.qos = 1;
       client.send(message);
+
+      // Timeout de segurança se a placa demorar a responder
+      setTimeout(() => {
+        if (aguardandoResposta) {
+          aguardandoResposta = false;
+          btnEl.disabled = false;
+          btnEl.textContent = estadoAtual === "1" ? "Desligar LED" : "Ligar LED";
+        }
+      }, 4000);
     }
 
-    // Inicia a conexão
     conectar();
   </script>
 
